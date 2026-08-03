@@ -1,0 +1,16 @@
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+
+# never commit pairings or secrets
+pairing.json
+secrets.json
