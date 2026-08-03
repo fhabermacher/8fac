@@ -1,0 +1,21 @@
+[Unit]
+Description=8fac blind relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=8fac
+Group=8fac
+WorkingDirectory=/opt/8fac
+ExecStart=/opt/8fac/.venv/bin/python /opt/8fac/relay.py --host 127.0.0.1 --port 8443
+Restart=always
+RestartSec=3
+# the relay holds no secrets, but lock it down anyway
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

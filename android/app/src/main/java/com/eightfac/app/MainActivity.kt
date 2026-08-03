@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -56,6 +58,16 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(this@MainActivity, CodesActivity::class.java))
             })
             addView(button("Arm auto-accept…") { pickAutoAcceptScope() })
+            // Doze suspends the relay socket; exemption keeps requests
+            // arriving until the push wake-up path exists
+            val pm = getSystemService(PowerManager::class.java)
+            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
+                addView(button("Allow background (battery exemption)") {
+                    startActivity(Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:$packageName")))
+                })
+            }
         }
         setContentView(root)
         refresh()
