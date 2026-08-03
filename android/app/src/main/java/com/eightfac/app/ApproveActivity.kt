@@ -64,9 +64,15 @@ class ApproveActivity : AppCompatActivity() {
             nm.notify(reqId.hashCode(), NotificationCompat.Builder(ctx, "requests")
                 .setContentTitle("Code request: $service")
                 .setContentText("Tap to approve with fingerprint")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
+                .setSmallIcon(R.drawable.ic_stat_8fac)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setContentIntent(pi)
+                // locked/screen-off phone: launch the fingerprint prompt
+                // DIRECTLY (like an incoming call) — approval is then a
+                // single sensor touch, no tap. Phone-in-use falls back to
+                // a heads-up notification by OS design.
+                .setFullScreenIntent(pi, true)
                 .setAutoCancel(true)
                 .setTimeoutAfter(45_000) // matches PC-side TIMEOUT
                 .build())

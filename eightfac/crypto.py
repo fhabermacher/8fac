@@ -21,10 +21,14 @@ def seal(key: bytes, payload: dict) -> str:
     return base64.b64encode(bytes(ct)).decode()  # nonce||ciphertext
 
 
-def unseal(key: bytes, blob_b64: str) -> dict:
-    """Decrypt and freshness-check. Raises on tamper or staleness."""
+def unseal(key: bytes, blob_b64: str, max_age: float | None = MAX_SKEW) -> dict:
+    """Decrypt and freshness-check. Raises on tamper or staleness.
+
+    max_age=None skips the staleness check — only for payload types where
+    replay is harmless (e.g. "endpoint" mailbox deposits, which may sit at
+    the relay far longer than MAX_SKEW)."""
     raw = base64.b64decode(blob_b64)
     payload = json.loads(nacl.secret.SecretBox(key).decrypt(raw).decode())
-    if abs(time.time() - payload["ts"]) > MAX_SKEW:
+    if max_age is not None and abs(time.time() - payload["ts"]) > max_age:
         raise ValueError("stale payload")
     return payload

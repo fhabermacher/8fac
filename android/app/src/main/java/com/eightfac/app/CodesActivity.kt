@@ -1,64 +1,101 @@
 package com.eightfac.app
 
 import android.os.Bundle
-import android.os.CountDownTimer
 import android.security.keystore.UserNotAuthenticatedException
-import android.view.Gravity
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.eightfac.app.ui.EightfacTheme
+import kotlinx.coroutines.delay
 
-/** Manual fallback: show TOTP codes locally, like any authenticator.
- *  This screen is what makes depending on 8fac safe — a dead relay
- *  degrades to "read the code off the phone", never to lockout.
- *
- *  Per-use keys need one fingerprint per code; inside an armed auto-accept
- *  window (or within the OS auth window after any recent strong auth) the
- *  "totpw:" key lets us skip the prompt. */
+/** Manual fallback: codes shown locally, like any authenticator — a dead
+ *  relay degrades to "read the code off the phone", never to lockout.
+ *  One fingerprint per code (per-use Keystore keys); free inside an armed
+ *  auto-accept / recent-auth window. */
 class CodesActivity : AppCompatActivity() {
 
-    private lateinit var list: LinearLayout
-    private var ticker: CountDownTimer? = null
+    // service -> code shown; codes vanish at each 30 s boundary
+    private val codes = mutableStateMapOf<String, String>()
+    private var now by mutableLongStateOf(System.currentTimeMillis())
 
+    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        list = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(48, 96, 48, 48)
+        setContent {
+            EightfacTheme {
+                LaunchedEffect(Unit) {
+                    while (true) {
+                        now = System.currentTimeMillis()
+                        if (now % 30_000 < 250) codes.clear() // period rolled
+                        delay(200)
+                    }
+                }
+                val remaining = 30f - (now % 30_000) / 1000f
+                Scaffold(topBar = { TopAppBar(title = { Text("Codes") }) }) { pad ->
+                    Column(Modifier.padding(pad).padding(horizontal = 20.dp)
+                        .fillMaxSize()) {
+                        LinearProgressIndicator(
+                            progress = { remaining / 30f },
+                            Modifier.fillMaxWidth().padding(vertical = 10.dp))
+                        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            val services = SecretVault.services()
+                            if (services.isEmpty()) item {
+                                Text("No secrets yet — add one from the main screen.")
+                            }
+                            items(services) { svc -> ServiceCard(svc) }
+                        }
+                    }
+                }
+            }
         }
-        setContentView(ScrollView(this).apply { addView(list) })
-        render()
     }
 
-    private fun render() {
-        list.removeAllViews()
-        val services = SecretVault.services()
-        if (services.isEmpty()) {
-            list.addView(TextView(this).apply {
-                text = "No secrets yet — add one from the main screen."
-                textSize = 16f
-            })
-        }
-        for (svc in services) {
-            val codeView = TextView(this).apply {
-                text = "• • • • • •"; textSize = 34f
-                gravity = Gravity.CENTER
-            }
-            val btn = Button(this).apply {
-                text = svc
-                setOnClickListener { showCode(svc, codeView) }
-            }
-            list.addView(btn); list.addView(codeView)
+    @androidx.compose.runtime.Composable
+    private fun ServiceCard(service: String) = Card(
+        Modifier.fillMaxWidth().clickable { reveal(service) }) {
+        Column(Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(service, style = MaterialTheme.typography.titleMedium)
+            val code = codes[service]
+            Text(
+                code?.let { "${it.take(3)} ${it.drop(3)}" } ?: "•••  •••",
+                style = MaterialTheme.typography.displaySmall,
+                fontFamily = FontFamily.Monospace,
+                color = if (code != null) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outline,
+            )
+            if (code == null)
+                Text("tap to reveal", style = MaterialTheme.typography.labelMedium)
         }
     }
 
-    private fun showCode(service: String, out: TextView) {
-        // free ride if a strong auth happened within the OS window
-        try {
-            display(Totp.code(SecretVault.macFor(service, window = true)), out)
+    private fun reveal(service: String) {
+        try { // free ride within the OS auth window
+            codes[service] = Totp.code(SecretVault.macFor(service, window = true))
             return
         } catch (_: UserNotAuthenticatedException) { /* prompt below */ }
 
@@ -67,7 +104,7 @@ class CodesActivity : AppCompatActivity() {
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(
                     result: BiometricPrompt.AuthenticationResult) {
-                    display(Totp.code(result.cryptoObject!!.mac!!), out)
+                    codes[service] = Totp.code(result.cryptoObject!!.mac!!)
                 }
             }
         ).authenticate(
@@ -76,22 +113,4 @@ class CodesActivity : AppCompatActivity() {
                 .setNegativeButtonText("Cancel").build(),
             BiometricPrompt.CryptoObject(mac))
     }
-
-    private fun display(code: String, out: TextView) {
-        ticker?.cancel()
-        val periodMs = 30_000L
-        val remaining = periodMs - System.currentTimeMillis() % periodMs
-        out.text = "${code.substring(0, 3)} ${code.substring(3)}"
-        ticker = object : CountDownTimer(remaining, 1_000) {
-            override fun onTick(ms: Long) {
-                title = "8fac codes — ${ms / 1000 + 1}s"
-            }
-            override fun onFinish() {
-                out.text = "expired — tap again"
-                title = "8fac codes"
-            }
-        }.start()
-    }
-
-    override fun onDestroy() { ticker?.cancel(); super.onDestroy() }
 }

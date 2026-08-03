@@ -46,6 +46,13 @@ class RelayService : Service() {
         pairing = Pairing.load(this) ?: run { stopSelf(); return START_NOT_STICKY }
         box = CryptoBox(pairing.key)
         startForeground(1, serviceNotification())
+        // A nudge (push wake, app opened, pairing changed) always tears down
+        // the socket: it may be half-dead after Doze/network changes, and a
+        // fresh connect is cheap. Cures the "force-stop to reconnect" state.
+        if (i?.action == ACTION_RECONNECT && ws != null) {
+            ws?.cancel(); ws = null
+            backoffMs = 1_000L
+        }
         if (ws == null) connect()
         return START_STICKY
     }
@@ -58,6 +65,11 @@ class RelayService : Service() {
                 webSocket.send(JSONObject()
                     .put("role", "phone").put("pair_id", pairing.pairId)
                     .toString())
+                Wake.endpoint(this@RelayService)?.let { url ->
+                    webSocket.send(JSONObject().put("deposit",
+                        box.seal(JSONObject().put("t", "endpoint")
+                            .put("url", url))).toString())
+                }
                 flushPending()
             }
 
@@ -116,7 +128,7 @@ class RelayService : Service() {
                 "8fac relay", NotificationManager.IMPORTANCE_MIN))
         return NotificationCompat.Builder(this, "relay")
             .setContentTitle("8fac listening")
-            .setSmallIcon(android.R.drawable.ic_lock_lock)
+            .setSmallIcon(R.drawable.ic_stat_8fac)
             .setOngoing(true).build()
     }
 
@@ -125,11 +137,18 @@ class RelayService : Service() {
     override fun onDestroy() { instance = null; super.onDestroy() }
 
     companion object {
+        private const val ACTION_RECONNECT = "com.eightfac.app.RECONNECT"
         private var instance: RelayService? = null
         private val pending = ArrayDeque<JSONObject>()
 
         fun start(ctx: Context) =
             ctx.startForegroundService(Intent(ctx, RelayService::class.java))
+
+        /** Start if needed AND force a fresh socket — the connection may be
+         *  half-dead. Called on push wake, app open, and re-pair. */
+        fun nudge(ctx: Context) =
+            ctx.startForegroundService(Intent(ctx, RelayService::class.java)
+                .setAction(ACTION_RECONNECT))
 
         /** Send an encrypted reply; queues (and restarts the service) if the
          *  socket is down so an approval never silently vanishes. */

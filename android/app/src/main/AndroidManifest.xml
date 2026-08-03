@@ -10,9 +10,13 @@
     <!-- sideloaded app: exemption keeps the relay socket alive in Doze
          until the UnifiedPush/FCM wake-up path replaces it -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- fingerprint-first approval on a locked phone (incoming-call style) -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:label="8fac"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
 
         <activity android:name=".MainActivity" android:exported="true">
@@ -34,6 +38,16 @@
         <!-- "Stop" action on the auto-accept countdown notification -->
         <receiver android:name=".AutoAccept$DisarmReceiver"
             android:exported="false" />
+
+        <!-- UnifiedPush wake-up delivery (from the distributor app) -->
+        <receiver android:name=".WakeReceiver" android:exported="true">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.MESSAGE" />
+                <action android:name="org.unifiedpush.android.connector.NEW_ENDPOINT" />
+                <action android:name="org.unifiedpush.android.connector.UNREGISTERED" />
+                <action android:name="org.unifiedpush.android.connector.REGISTRATION_FAILED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Keeps the relay WebSocket alive (prototype transport; swap for
              UnifiedPush/FCM wake-ups in production, see PROTOCOL.md §2) -->

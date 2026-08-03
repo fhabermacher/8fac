@@ -88,7 +88,7 @@ object AutoAccept {
             .createNotificationChannel(NotificationChannel(CHANNEL,
                 "Auto-accept", NotificationManager.IMPORTANCE_DEFAULT))
         return NotificationCompat.Builder(ctx, CHANNEL)
-            .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+            .setSmallIcon(R.drawable.ic_stat_8fac)
     }
 
     class DisarmReceiver : BroadcastReceiver() {

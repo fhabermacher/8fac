@@ -10,6 +10,8 @@ import json
 import shutil
 import subprocess
 import sys
+import time
+import urllib.request
 import uuid
 
 import websockets
@@ -19,7 +21,31 @@ from eightfac import config, crypto
 TIMEOUT = 45  # phone gets this long to approve
 
 
-async def _await_reply(ws, key: bytes, req_id: str) -> str:
+def wake_phone(pairing: dict):
+    """POST to the phone's push endpoint (learned via the relay mailbox) so
+    a Dozing phone wakes and connects. No payload beyond 'wake up'."""
+    url = pairing.get("wake")
+    if not url:
+        return
+    try:
+        req = urllib.request.Request(
+            url, data=b"8fac", method="POST",
+            headers={"Title": "8fac", "Priority": "urgent",
+                     "Tags": "closed_lock_with_key"})
+        urllib.request.urlopen(req, timeout=5)
+    except Exception as e:
+        print(f"(wake push failed: {e})", file=sys.stderr)
+
+
+def learn_endpoint(pairing: dict, url: str):
+    if pairing.get("wake") == url:
+        return
+    pairing["wake"] = url
+    config.PAIRING.write_text(json.dumps(pairing, indent=2))
+    print("(learned phone push endpoint)", file=sys.stderr)
+
+
+async def _await_reply(ws, key: bytes, req_id: str, pairing: dict) -> str:
     async for raw in ws:
         msg = json.loads(raw)
         if msg.get("type") == "peer_offline":
@@ -28,9 +54,15 @@ async def _await_reply(ws, key: bytes, req_id: str) -> str:
         if "blob" not in msg:
             continue
         try:
-            payload = crypto.unseal(key, msg["blob"])
+            payload = crypto.unseal(key, msg["blob"], max_age=None)
         except Exception:
-            continue  # tampered or stale — ignore
+            continue  # tampered — ignore
+        if payload.get("t") == "endpoint":
+            learn_endpoint(pairing, payload["url"])
+            continue
+        # non-endpoint payloads keep the strict freshness bound
+        if abs(time.time() - payload.get("ts", 0)) > crypto.MAX_SKEW:
+            continue
         if payload.get("id") != req_id:
             continue
         if payload["t"] == "code":
@@ -45,6 +77,7 @@ async def fetch_code(service: str) -> str:
     key = config.key_bytes(pairing)
     req_id = str(uuid.uuid4())
 
+    wake_phone(pairing)
     async with websockets.connect(pairing["relay"]) as ws:
         await ws.send(json.dumps({"role": "pc", "pair_id": pairing["pair_id"]}))
         await ws.send(json.dumps(
@@ -52,7 +85,8 @@ async def fetch_code(service: str) -> str:
                                        "service": service})}))
         print(f"waiting for phone approval ({service})...", file=sys.stderr)
         try:
-            return await asyncio.wait_for(_await_reply(ws, key, req_id), TIMEOUT)
+            return await asyncio.wait_for(
+                _await_reply(ws, key, req_id, pairing), TIMEOUT)
         except asyncio.TimeoutError:
             raise SystemExit("timed out")
 

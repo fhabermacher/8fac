@@ -7,30 +7,59 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
 import android.widget.Toast
-import androidx.appcompat.app.AlertDialog
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.biometric.BiometricManager.Authenticators
 import androidx.biometric.BiometricPrompt
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.eightfac.app.ui.EightfacTheme
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
-/** Home screen: pair with a PC, import otpauth:// secrets, open the
- *  offline fallback codes screen, arm auto-accept. Deliberately ugly —
- *  function first. */
+data class HomeState(
+    val paired: Boolean = false,
+    val relayHost: String = "",
+    val services: List<String> = emptyList(),
+    val wakeReady: Boolean = false,
+    val batteryExempt: Boolean = true,
+)
+
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var status: TextView
+    private var state by mutableStateOf(HomeState())
+    private var scopeDialog by mutableStateOf(false)
 
     private val scanPairing = registerForActivityResult(ScanContract()) { res ->
         res.contents?.let {
             runCatching { Pairing.fromQr(it) }
                 .onSuccess { p ->
-                    Pairing.save(this, p); RelayService.start(this); refresh()
+                    Pairing.save(this, p); RelayService.nudge(this); refresh()
                 }
                 .onFailure { toast("Not a valid 8fac pairing QR") }
         }
@@ -42,44 +71,130 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        status = TextView(this).apply { textSize = 18f }
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL; setPadding(48, 96, 48, 48)
-            addView(status)
-            addView(button("Pair with PC (scan QR)") {
-                scanPairing.launch(ScanOptions()
-                    .setPrompt("Scan the QR from pair.py"))
-            })
-            addView(button("Add secret (scan otpauth QR)") {
-                scanSecret.launch(ScanOptions()
-                    .setPrompt("Scan the site's authenticator QR"))
-            })
-            addView(button("Show codes (offline fallback)") {
-                startActivity(Intent(this@MainActivity, CodesActivity::class.java))
-            })
-            addView(button("Arm auto-accept…") { pickAutoAcceptScope() })
-            // Doze suspends the relay socket; exemption keeps requests
-            // arriving until the push wake-up path exists
-            val pm = getSystemService(PowerManager::class.java)
-            if (!pm.isIgnoringBatteryOptimizations(packageName)) {
-                addView(button("Allow background (battery exemption)") {
-                    startActivity(Intent(
-                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-                        Uri.parse("package:$packageName")))
-                })
-            }
-        }
-        setContentView(root)
-        refresh()
-        // Android 13+: notifications (approval prompts!) are silent without this
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
                 android.Manifest.permission.POST_NOTIFICATIONS) !=
             PackageManager.PERMISSION_GRANTED) {
             requestPermissions(
                 arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
         }
-        if (Pairing.load(this) != null) RelayService.start(this)
+        Wake.setup(this)
+        if (Pairing.load(this) != null) RelayService.nudge(this)
+        setContent { EightfacTheme { HomeScreen() } }
+        refresh()
     }
+
+    override fun onResume() { super.onResume(); refresh() }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @androidx.compose.runtime.Composable
+    private fun HomeScreen() {
+        Scaffold(topBar = { TopAppBar(title = { Text("8fac") }) }) { pad ->
+            Column(
+                Modifier.padding(pad).padding(horizontal = 20.dp)
+                    .fillMaxSize().verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                StatusCard()
+                ServicesCard()
+                ActionButtons()
+                if (!state.batteryExempt) BatteryCard()
+            }
+        }
+        if (scopeDialog) ScopeDialog()
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun StatusCard() = Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(if (state.paired) "Paired ✓" else "Not paired",
+                style = MaterialTheme.typography.titleLarge)
+            if (state.paired)
+                Text("Relay: ${state.relayHost}",
+                    style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (state.wakeReady) "Push wake: ready ✓"
+                else "Push wake: none — install the ntfy app for reliable wake-ups",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (state.wakeReady) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun ServicesCard() = Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Secrets", style = MaterialTheme.typography.titleMedium)
+            if (state.services.isEmpty())
+                Text("None yet — add one by scanning a site's authenticator QR.",
+                    style = MaterialTheme.typography.bodyMedium)
+            else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                state.services.forEach {
+                    AssistChip(onClick = {}, label = { Text(it) })
+                }
+            }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun ActionButtons() = Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Button(onClick = {
+            scanPairing.launch(ScanOptions().setPrompt("Scan the QR from pair.py"))
+        }, Modifier.fillMaxWidth()) { Text("Pair with PC") }
+        FilledTonalButton(onClick = {
+            scanSecret.launch(ScanOptions()
+                .setPrompt("Scan the site's authenticator QR"))
+        }, Modifier.fillMaxWidth()) { Text("Add secret") }
+        FilledTonalButton(onClick = {
+            startActivity(Intent(this@MainActivity, CodesActivity::class.java))
+        }, Modifier.fillMaxWidth()) { Text("Show codes (offline fallback)") }
+        OutlinedButton(onClick = {
+            if (state.services.isEmpty()) toast("No secrets yet")
+            else scopeDialog = true
+        }, Modifier.fillMaxWidth()) { Text("Arm auto-accept…") }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun BatteryCard() = Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Background reliability",
+                style = MaterialTheme.typography.titleMedium)
+            Text("Without a battery exemption Android may delay requests " +
+                "when the phone is idle.",
+                style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = {
+                startActivity(Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")))
+            }) { Text("Allow background") }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun ScopeDialog() = AlertDialog(
+        onDismissRequest = { scopeDialog = false },
+        title = { Text("Auto-accept for 5 min") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                state.services.forEach { svc ->
+                    TextButton(onClick = {
+                        scopeDialog = false; armWithBiometric(svc)
+                    }) { Text(svc) }
+                }
+                TextButton(onClick = {
+                    scopeDialog = false
+                    armWithBiometric(AutoAccept.SCOPE_ALL)
+                }) { Text("ALL services (loud option)") }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { scopeDialog = false }) { Text("Cancel") }
+        },
+    )
 
     /** otpauth://totp/Issuer:account?secret=BASE32&issuer=Issuer */
     private fun importOtpauth(text: String) {
@@ -99,20 +214,7 @@ class MainActivity : AppCompatActivity() {
             .onFailure { toast("Import failed: ${it.message}") }
     }
 
-    private fun pickAutoAcceptScope() {
-        val services = SecretVault.services()
-        if (services.isEmpty()) { toast("No secrets yet"); return }
-        val items = (services + "ALL services (loud option)").toTypedArray()
-        AlertDialog.Builder(this)
-            .setTitle("Auto-accept for 5 min — which service?")
-            .setItems(items) { _, i ->
-                val scope = if (i == services.size) AutoAccept.SCOPE_ALL
-                            else services[i]
-                armWithBiometric(scope)
-            }.show()
-    }
-
-    /** Arming always costs one auth — it's also what unlocks the OS-side
+    /** Arming always costs one auth — it also unlocks the OS-side
      *  auth-window keys that auto-accept relies on. */
     private fun armWithBiometric(scope: String) {
         BiometricPrompt(this, ContextCompat.getMainExecutor(this),
@@ -133,18 +235,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
-        val paired = Pairing.load(this) != null
-        val services = SecretVault.services()
-        status.text = buildString {
-            append(if (paired) "Paired ✓" else "Not paired")
-            append("\nSecrets: ")
-            append(if (services.isEmpty()) "none" else services.joinToString())
-            append("\n")
-        }
+        val pairing = Pairing.load(this)
+        val pm = getSystemService(PowerManager::class.java)
+        state = HomeState(
+            paired = pairing != null,
+            relayHost = pairing?.relay?.removePrefix("wss://")
+                ?.removePrefix("ws://") ?: "",
+            services = SecretVault.services(),
+            wakeReady = Wake.ready(this),
+            batteryExempt = pm.isIgnoringBatteryOptimizations(packageName),
+        )
     }
-
-    private fun button(label: String, onClick: () -> Unit) =
-        Button(this).apply { text = label; setOnClickListener { onClick() } }
 
     private fun toast(msg: String) =
         Toast.makeText(this, msg, Toast.LENGTH_LONG).show()

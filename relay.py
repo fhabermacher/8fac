@@ -24,6 +24,10 @@ log = logging.getLogger("8fac.relay")
 peers: dict[str, dict] = {}
 # (pair_id, target_role) -> list[(expiry_ts, frame_str)]
 queues: dict[tuple, list] = {}
+# pair_id -> last blob the phone deposited (its encrypted push endpoint);
+# delivered to the PC on every connect. Opaque to the relay, memory-only —
+# the phone re-deposits on each of its connects.
+mailbox: dict[str, str] = {}
 
 OTHER = {"pc": "phone", "phone": "pc"}
 
@@ -49,6 +53,8 @@ async def handle(ws):
         slot[role] = ws
         log.info("%s connected (%s)", role, pair_id[:8])
 
+        if role == "pc" and pair_id in mailbox:
+            await ws.send(json.dumps({"blob": mailbox[pair_id]}))
         for frame in _flush_queue(pair_id, role):
             await ws.send(frame)
 
@@ -57,7 +63,13 @@ async def handle(ws):
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
-            if "blob" not in msg or len(raw) > 65536:
+            if len(raw) > 65536:
+                continue
+            if role == "phone" and "deposit" in msg:
+                if isinstance(msg["deposit"], str):
+                    mailbox[pair_id] = msg["deposit"]
+                continue
+            if "blob" not in msg:
                 continue
             frame = json.dumps({"blob": msg["blob"]})
             peer = peers.get(pair_id, {}).get(OTHER[role])

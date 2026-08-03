@@ -48,9 +48,26 @@ The relay forwards `blob` frames verbatim to the opposite role of the same
 Control frames from the relay: `{"type": "peer_offline"}` sent to a peer whose
 counterpart is absent and whose frame has been queued.
 
-Wake-up push (production): the PC additionally posts an empty notification to
-the phone's push channel (ntfy / UnifiedPush / FCM) containing only `pair_id`.
-The prototype phone-stub instead just stays connected.
+### Wake-up push + endpoint mailbox
+
+An always-on phone socket dies to Doze and network changes, so the real
+transport is wake-on-demand:
+
+1. The phone registers with a UnifiedPush distributor (e.g. the ntfy app)
+   and obtains a push endpoint URL.
+2. On every relay connect, the phone *deposits* that endpoint, sealed like
+   any payload (`{"t": "endpoint", "url": ...}`), as
+   `{"deposit": "<blob>"}`. The relay stores the latest deposit per pair
+   (opaque, memory-only) and hands it to the PC on each PC connect.
+   Deposits are exempt from the freshness bound (replay is harmless —
+   worst case an obsolete endpoint gets a spurious wake).
+3. `request.py` learns the endpoint into `pairing.json` (`"wake"`) and
+   thereafter POSTs a contentless wake to it before each request. The
+   woken phone connects, receives the queued request, proceeds as normal.
+
+The push channel carries no secrets — an attacker with the endpoint URL can
+only make the phone connect to the relay. The prototype phone-stub skips all
+of this and just stays connected.
 
 ## 3. Payloads (inside secretbox)
 
