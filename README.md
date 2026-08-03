@@ -14,9 +14,11 @@ PC (hotkey: request.py) ──E2E blob──▶ relay.py ──E2E blob──▶
 
 - **Working today** (tested end-to-end): `relay.py`, `pair.py`, `request.py`,
   and `stub.py` — a phone *emulator* so the whole loop runs without the app.
-- **Skeleton**: `android/` — Kotlin app with the real security architecture
-  (Keystore-imported HMAC keys, BiometricPrompt CryptoObject, E2E secretbox,
-  OkHttp relay client). Open in Android Studio; expect to finish TODOs.
+- **Skeleton**: `android/` — Kotlin app with the real security architecture:
+  Keystore-imported HMAC keys (per-use biometric + OS-capped auth-window
+  aliases for auto-accept), BiometricPrompt CryptoObject approval, E2E
+  secretbox, otpauth:// QR import, manual fallback codes screen, reconnecting
+  OkHttp relay client. Not yet device-tested — open in Android Studio.
 
 ## Quickstart (all on one machine)
 

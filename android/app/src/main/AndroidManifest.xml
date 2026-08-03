@@ -25,6 +25,13 @@
             android:showWhenLocked="true"
             android:turnScreenOn="true" />
 
+        <!-- Manual fallback: codes shown locally, relay-down ≠ lockout -->
+        <activity android:name=".CodesActivity" android:exported="false" />
+
+        <!-- "Stop" action on the auto-accept countdown notification -->
+        <receiver android:name=".AutoAccept$DisarmReceiver"
+            android:exported="false" />
+
         <!-- Keeps the relay WebSocket alive (prototype transport; swap for
              UnifiedPush/FCM wake-ups in production, see PROTOCOL.md §2) -->
         <service android:name=".RelayService"

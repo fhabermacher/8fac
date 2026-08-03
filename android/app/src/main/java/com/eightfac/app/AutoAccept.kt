@@ -1,38 +1,97 @@
 package com.eightfac.app
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
+import androidx.core.app.NotificationCompat
 
 /** Time-boxed auto-approval windows (PROTOCOL.md §4).
  *
- *  Arming always costs one fingerprint (the arming flow authenticates
- *  against a Keystore key imported with authWindowSeconds = window, so the
- *  OS itself enforces the validity period — we don't hold secrets hostage
- *  to app logic). Scope "*" means all services; default is per-service.
- *  Hard cap 15 min. Everything approved inside a window is logged and
- *  surfaced when it ends. */
+ *  Layered enforcement:
+ *  - The OS: auto-accept uses the "totpw:" auth-window Keystore keys, valid
+ *    for at most [MAX_SECONDS] after the arming fingerprint. Even a bug here
+ *    can't stretch beyond that.
+ *  - This class: the user-chosen (shorter) window and scope, the countdown
+ *    notification with a Stop action, and the approval log surfaced when
+ *    the window ends. */
 object AutoAccept {
     const val DEFAULT_SECONDS = 5 * 60
     const val MAX_SECONDS = 15 * 60
+    const val SCOPE_ALL = "*"
+    private const val NOTIF_ID = 2
+    private const val CHANNEL = "autoaccept"
 
     private val until = HashMap<String, Long>()  // scope -> elapsedRealtime ms
-    val log = ArrayList<String>()
+    private val approvals = ArrayList<String>()
+    private val handler = Handler(Looper.getMainLooper())
+    private var expiry: Runnable? = null
 
-    fun arm(scope: String, seconds: Int = DEFAULT_SECONDS) {
-        require(seconds <= MAX_SECONDS)
+    /** Call ONLY after a successful BiometricPrompt — the prompt is what
+     *  makes the OS-side window keys usable at all. */
+    fun arm(ctx: Context, scope: String, seconds: Int = DEFAULT_SECONDS) {
+        require(seconds in 1..MAX_SECONDS)
         until[scope] = SystemClock.elapsedRealtime() + seconds * 1000L
-        // TODO: persistent countdown notification with a "stop" action
-        // TODO: widget PendingIntent lands here (after BiometricPrompt)
+        showCountdown(ctx, scope, seconds)
+        expiry?.let { handler.removeCallbacks(it) }
+        expiry = Runnable { disarm(ctx) }.also {
+            handler.postDelayed(it, seconds * 1000L)
+        }
     }
 
-    fun disarm() { until.clear() }
+    fun disarm(ctx: Context) {
+        until.clear()
+        expiry?.let { handler.removeCallbacks(it) }
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.cancel(NOTIF_ID)
+        if (approvals.isNotEmpty()) {
+            nm.notify(NOTIF_ID + 1, builder(ctx)
+                .setContentTitle("Auto-accept ended")
+                .setStyle(NotificationCompat.BigTextStyle()
+                    .bigText("Approved without prompt:\n" +
+                        approvals.joinToString("\n")))
+                .setAutoCancel(true).build())
+            approvals.clear()
+        }
+    }
 
+    /** True if [service] is covered by an armed window; logs the hit. */
     fun isArmed(service: String): Boolean {
         val now = SystemClock.elapsedRealtime()
-        return listOf(service, "*").any { (until[it] ?: 0) > now }
-            .also { if (it) log.add(service) }
+        val hit = listOf(service, SCOPE_ALL).any { (until[it] ?: 0) > now }
+        if (hit) approvals.add(service)
+        return hit
     }
 
-    fun remainingMs(): Long =
-        ((until.values.maxOrNull() ?: 0) - SystemClock.elapsedRealtime())
-            .coerceAtLeast(0)
+    private fun showCountdown(ctx: Context, scope: String, seconds: Int) {
+        val stop = PendingIntent.getBroadcast(ctx, 0,
+            Intent(ctx, DisarmReceiver::class.java),
+            PendingIntent.FLAG_IMMUTABLE)
+        val label = if (scope == SCOPE_ALL) "ALL services" else scope
+        ctx.getSystemService(NotificationManager::class.java)
+            .notify(NOTIF_ID, builder(ctx)
+                .setContentTitle("Auto-accept armed: $label")
+                .setUsesChronometer(true).setChronometerCountDown(true)
+                .setWhen(System.currentTimeMillis() + seconds * 1000L)
+                .setOngoing(true)
+                .addAction(0, "Stop", stop)
+                .build())
+    }
+
+    private fun builder(ctx: Context): NotificationCompat.Builder {
+        ctx.getSystemService(NotificationManager::class.java)
+            .createNotificationChannel(NotificationChannel(CHANNEL,
+                "Auto-accept", NotificationManager.IMPORTANCE_DEFAULT))
+        return NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(android.R.drawable.ic_lock_idle_lock)
+    }
+
+    class DisarmReceiver : BroadcastReceiver() {
+        override fun onReceive(ctx: Context, intent: Intent) = disarm(ctx)
+    }
 }

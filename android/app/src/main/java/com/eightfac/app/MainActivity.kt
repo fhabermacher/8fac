@@ -1,51 +1,130 @@
 package com.eightfac.app
 
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.biometric.BiometricManager.Authenticators
+import androidx.biometric.BiometricPrompt
+import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 
-/** Minimal home screen: pair with a PC (scan its QR), list services,
- *  start the relay service. Deliberately ugly — function first.
- *
- *  TODO: import secrets by scanning otpauth:// QRs (Totp.base32Decode →
- *        SecretVault.importSecret), manual code display as relay-down
- *        fallback (a MUST before depending on this — see README), and the
- *        auto-accept arm button/widget (BiometricPrompt → AutoAccept.arm). */
+/** Home screen: pair with a PC, import otpauth:// secrets, open the
+ *  offline fallback codes screen, arm auto-accept. Deliberately ugly —
+ *  function first. */
 class MainActivity : AppCompatActivity() {
+
+    private lateinit var status: TextView
 
     private val scanPairing = registerForActivityResult(ScanContract()) { res ->
         res.contents?.let {
-            Pairing.save(this, Pairing.fromQr(it))
-            RelayService.start(this)
-            recreate()
+            runCatching { Pairing.fromQr(it) }
+                .onSuccess { p ->
+                    Pairing.save(this, p); RelayService.start(this); refresh()
+                }
+                .onFailure { toast("Not a valid 8fac pairing QR") }
         }
+    }
+
+    private val scanSecret = registerForActivityResult(ScanContract()) { res ->
+        res.contents?.let { importOtpauth(it) }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        status = TextView(this).apply { textSize = 18f }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL; setPadding(48, 96, 48, 48)
-        }
-        val status = TextView(this).apply {
-            text = if (Pairing.load(this@MainActivity) != null)
-                "Paired ✓ — services: ${SecretVault.services().joinToString()}"
-            else "Not paired"
-            textSize = 18f
-        }
-        val pairBtn = Button(this).apply {
-            text = "Pair with PC (scan QR)"
-            setOnClickListener {
+            addView(status)
+            addView(button("Pair with PC (scan QR)") {
                 scanPairing.launch(ScanOptions()
                     .setPrompt("Scan the QR from pair.py"))
-            }
+            })
+            addView(button("Add secret (scan otpauth QR)") {
+                scanSecret.launch(ScanOptions()
+                    .setPrompt("Scan the site's authenticator QR"))
+            })
+            addView(button("Show codes (offline fallback)") {
+                startActivity(Intent(this@MainActivity, CodesActivity::class.java))
+            })
+            addView(button("Arm auto-accept…") { pickAutoAcceptScope() })
         }
-        root.addView(status); root.addView(pairBtn)
         setContentView(root)
-
+        refresh()
         if (Pairing.load(this) != null) RelayService.start(this)
     }
+
+    /** otpauth://totp/Issuer:account?secret=BASE32&issuer=Issuer */
+    private fun importOtpauth(text: String) {
+        val uri = Uri.parse(text)
+        if (uri.scheme != "otpauth" || uri.host != "totp") {
+            toast("Not an otpauth://totp QR"); return
+        }
+        val secret = uri.getQueryParameter("secret")
+            ?: run { toast("QR has no secret"); return }
+        val label = uri.path?.trimStart('/') ?: ""
+        val service = (uri.getQueryParameter("issuer")
+            ?: label.substringBefore(':').ifEmpty { label })
+            .lowercase().replace(" ", "-")
+        runCatching {
+            SecretVault.importSecret(service, Totp.base32Decode(secret))
+        }.onSuccess { toast("Imported: $service"); refresh() }
+            .onFailure { toast("Import failed: ${it.message}") }
+    }
+
+    private fun pickAutoAcceptScope() {
+        val services = SecretVault.services()
+        if (services.isEmpty()) { toast("No secrets yet"); return }
+        val items = (services + "ALL services (loud option)").toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Auto-accept for 5 min — which service?")
+            .setItems(items) { _, i ->
+                val scope = if (i == services.size) AutoAccept.SCOPE_ALL
+                            else services[i]
+                armWithBiometric(scope)
+            }.show()
+    }
+
+    /** Arming always costs one auth — it's also what unlocks the OS-side
+     *  auth-window keys that auto-accept relies on. */
+    private fun armWithBiometric(scope: String) {
+        BiometricPrompt(this, ContextCompat.getMainExecutor(this),
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(
+                    r: BiometricPrompt.AuthenticationResult) {
+                    AutoAccept.arm(this@MainActivity, scope)
+                    toast("Auto-accept armed: $scope")
+                }
+            }
+        ).authenticate(BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Arm auto-accept")
+            .setSubtitle(if (scope == AutoAccept.SCOPE_ALL)
+                "ALL services, 5 minutes" else "$scope, 5 minutes")
+            .setAllowedAuthenticators(Authenticators.BIOMETRIC_STRONG or
+                Authenticators.DEVICE_CREDENTIAL)
+            .build())
+    }
+
+    private fun refresh() {
+        val paired = Pairing.load(this) != null
+        val services = SecretVault.services()
+        status.text = buildString {
+            append(if (paired) "Paired ✓" else "Not paired")
+            append("\nSecrets: ")
+            append(if (services.isEmpty()) "none" else services.joinToString())
+            append("\n")
+        }
+    }
+
+    private fun button(label: String, onClick: () -> Unit) =
+        Button(this).apply { text = label; setOnClickListener { onClick() } }
+
+    private fun toast(msg: String) =
+        Toast.makeText(this, msg, Toast.LENGTH_LONG).show()
 }

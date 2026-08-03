@@ -30,13 +30,13 @@ class ApproveActivity : AppCompatActivity() {
                 override fun onAuthenticationSucceeded(
                     result: BiometricPrompt.AuthenticationResult) {
                     val code = Totp.code(result.cryptoObject!!.mac!!)
-                    RelayService.instance?.reply(JSONObject()
+                    RelayService.sendFrom(this@ApproveActivity, JSONObject()
                         .put("t", "code").put("id", reqId).put("code", code))
                     finish()
                 }
 
                 override fun onAuthenticationError(code: Int, msg: CharSequence) {
-                    RelayService.instance?.reply(JSONObject()
+                    RelayService.sendFrom(this@ApproveActivity, JSONObject()
                         .put("t", "deny").put("id", reqId))
                     finish()
                 }
