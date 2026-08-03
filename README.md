@@ -45,6 +45,7 @@ code into the focused window (xdotool/wtype) instead of clipboard.
 | `eightfac/` | shared lib: RFC 6238 TOTP, secretbox envelope, config |
 | `pair.py` / `request.py` | PC side: create pairing QR / request a code |
 | `stub.py` | phone emulator for end-to-end testing |
+| `testsite.py` | pretend third-party service: otpauth QR enrollment + code verification, so the full chain can be rehearsed with zero real accounts |
 | `android/` | Kotlin app skeleton (Android Studio project) |
 
 ## Non-negotiables before real use
