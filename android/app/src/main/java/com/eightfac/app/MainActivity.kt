@@ -1,7 +1,9 @@
 package com.eightfac.app
 
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.LinearLayout
@@ -57,6 +59,13 @@ class MainActivity : AppCompatActivity() {
         }
         setContentView(root)
         refresh()
+        // Android 13+: notifications (approval prompts!) are silent without this
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(
+                android.Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
         if (Pairing.load(this) != null) RelayService.start(this)
     }
 

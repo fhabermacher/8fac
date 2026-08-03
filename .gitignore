@@ -14,3 +14,4 @@ android/.idea/
 # never commit pairings or secrets
 pairing.json
 secrets.json
+pairing-qr.png
