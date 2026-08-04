@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
-"""Service picker for the 8fac hotkey: type to filter, click or
-Enter/Tab/arrows to choose. Prints the chosen service to stdout.
+"""Service picker for the 8fac hotkey.
 
-Most-recently-used order (services.txt keeps MRU-first). Free text is
-allowed — whatever is in the entry when you hit Enter wins if nothing
-matches, so new services need no extra flow.
+A text field plus the ~10 most-recent services as real BUTTONS:
+- click one, or Tab/Shift+Tab onto it and hit Enter/Space
+- or just type: buttons filter live; Enter takes the top match
+  (free text wins if nothing matches, so new services need no extra flow)
+- Esc cancels
+
+Prints the chosen service to stdout; exit 1 on cancel.
 """
 import sys
-import tkinter as tk
 from pathlib import Path
 
-from eightfac import config  # noqa: E402  (run from repo root)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import tkinter as tk  # noqa: E402
+
+from eightfac import config  # noqa: E402
 
 SERVICES = config.CONF_DIR / "services.txt"
+MAX_BUTTONS = 10
 
 
 def main():
-    known = SERVICES.read_text().split() if SERVICES.exists() else []
+    known = (SERVICES.read_text().split() if SERVICES.exists() else [])
 
     root = tk.Tk()
     root.title("8fac — code for…")
@@ -24,61 +31,51 @@ def main():
     root.geometry("+%d+%d" % (root.winfo_screenwidth() // 2 - 170,
                               root.winfo_screenheight() // 3))
 
+    def done(choice: str):
+        print(choice)
+        root.destroy()
+
     query = tk.StringVar()
-    entry = tk.Entry(root, textvariable=query, font=("Sans", 14), width=32)
-    entry.pack(padx=10, pady=(10, 4))
-    listbox = tk.Listbox(root, font=("Sans", 13), height=min(10, max(3, len(known))),
-                         activestyle="dotbox")
-    listbox.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    entry = tk.Entry(root, textvariable=query, font=("Sans", 14), width=30)
+    entry.pack(padx=12, pady=(12, 6))
+    frame = tk.Frame(root)
+    frame.pack(fill="both", expand=True, padx=12, pady=(0, 12))
 
     filtered = []
 
     def refilter(*_):
         nonlocal filtered
         q = query.get().lower()
-        filtered = [s for s in known if q in s.lower()]
-        listbox.delete(0, "end")
+        filtered = [s for s in known if q in s.lower()][:MAX_BUTTONS]
+        for w in frame.winfo_children():
+            w.destroy()
         for s in filtered:
-            listbox.insert("end", s)
-        if filtered:
-            listbox.selection_clear(0, "end")
-            listbox.selection_set(0)
-            listbox.activate(0)
+            tk.Button(frame, text=s, font=("Sans", 12), anchor="w",
+                      command=lambda s=s: done(s)
+                      ).pack(fill="x", pady=1)
+        if not filtered and q:
+            tk.Label(frame, text=f'Enter ↵ requests "{q.strip()}"',
+                     font=("Sans", 10), fg="gray").pack()
 
-    def move(delta):
-        if not filtered:
-            return "break"
-        cur = listbox.curselection()
-        idx = (cur[0] + delta) % len(filtered) if cur else 0
-        listbox.selection_clear(0, "end")
-        listbox.selection_set(idx)
-        listbox.activate(idx)
-        listbox.see(idx)
-        return "break"
-
-    def choose(*_):
-        cur = listbox.curselection()
-        if cur and filtered:
-            print(filtered[cur[0]])
+    def on_enter(_=None):
+        focused = root.focus_get()
+        if isinstance(focused, tk.Button):
+            focused.invoke()
+        elif filtered:
+            done(filtered[0])
         elif query.get().strip():
-            print(query.get().strip())
+            done(query.get().strip())
         else:
             sys.exit(1)
-        root.destroy()
 
     query.trace_add("write", refilter)
-    entry.bind("<Return>", choose)
-    entry.bind("<Tab>", lambda e: move(1))
-    entry.bind("<ISO_Left_Tab>", lambda e: move(-1))
-    entry.bind("<Down>", lambda e: move(1))
-    entry.bind("<Up>", lambda e: move(-1))
-    entry.bind("<Escape>", lambda e: sys.exit(1))
-    listbox.bind("<Double-Button-1>", choose)
-    listbox.bind("<Return>", choose)
+    root.bind("<Return>", on_enter)
+    root.bind("<Escape>", lambda e: sys.exit(1))
 
     refilter()
     entry.focus_force()
     root.mainloop()
+    sys.exit(1)  # window closed without a choice
 
 
 if __name__ == "__main__":
