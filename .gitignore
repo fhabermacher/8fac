@@ -15,3 +15,6 @@ android/.idea/
 pairing.json
 secrets.json
 pairing-qr.png
+android/release.jks
+android/keystore.properties
+invites.txt

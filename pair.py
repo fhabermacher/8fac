@@ -10,9 +10,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--relay", default="ws://127.0.0.1:8443",
                     help="relay WebSocket URL the phone should use")
+    ap.add_argument("--invite", help="invite token, if the relay requires one")
     args = ap.parse_args()
 
-    pairing = config.create_pairing(args.relay)
+    pairing = config.create_pairing(args.relay, args.invite)
     print(f"pairing written to {config.PAIRING}\n")
     payload = json.dumps(pairing, separators=(",", ":"))
     try:

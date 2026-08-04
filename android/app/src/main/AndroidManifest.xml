@@ -35,6 +35,19 @@
         <!-- Manual fallback: codes shown locally, relay-down ≠ lockout -->
         <activity android:name=".CodesActivity" android:exported="false" />
 
+        <!-- Widget tap target: scope picker + fingerprint, then finishes -->
+        <activity android:name=".ArmActivity" android:exported="false"
+            android:excludeFromRecents="true" />
+
+        <!-- Home-screen auto-accept widget -->
+        <receiver android:name=".ArmWidget" android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider"
+                android:resource="@xml/arm_widget_info" />
+        </receiver>
+
         <!-- "Stop" action on the auto-accept countdown notification -->
         <receiver android:name=".AutoAccept$DisarmReceiver"
             android:exported="false" />

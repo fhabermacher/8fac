@@ -39,6 +39,9 @@ def _flush_queue(pair_id: str, role: str):
     return fresh
 
 
+invites: set | None = None  # None = open relay; set = required tokens
+
+
 async def handle(ws):
     pair_id = role = None
     try:
@@ -46,6 +49,9 @@ async def handle(ws):
         pair_id, role = hello["pair_id"], hello["role"]
         if role not in OTHER or not isinstance(pair_id, str) or len(pair_id) > 64:
             await ws.close(1008, "bad hello")
+            return
+        if invites is not None and hello.get("invite") not in invites:
+            await ws.close(1008, "invite required")
             return
         slot = peers.setdefault(pair_id, {"pc": None, "phone": None})
         if slot[role] is not None:
@@ -95,11 +101,19 @@ async def handle(ws):
 
 
 async def main():
+    global invites
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8443)
+    ap.add_argument("--invites", metavar="FILE",
+                    help="one invite token per line; if set, hellos must "
+                         "carry a listed token (friends-phase gate)")
     args = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    if args.invites:
+        with open(args.invites) as f:
+            invites = {ln.strip() for ln in f if ln.strip()}
+        log.info("invite gating: %d token(s)", len(invites))
     async with websockets.serve(handle, args.host, args.port):
         log.info("relay listening on ws://%s:%d", args.host, args.port)
         await asyncio.Future()

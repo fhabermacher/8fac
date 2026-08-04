@@ -64,6 +64,7 @@ class RelayService : Service() {
                 backoffMs = 1_000L
                 webSocket.send(JSONObject()
                     .put("role", "phone").put("pair_id", pairing.pairId)
+                    .apply { pairing.invite?.let { put("invite", it) } }
                     .toString())
                 Wake.endpoint(this@RelayService)?.let { url ->
                     webSocket.send(JSONObject().put("deposit",

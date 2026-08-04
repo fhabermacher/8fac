@@ -103,8 +103,7 @@ async def main():
 
     async for ws in websockets.connect(pairing["relay"]):
         try:
-            await ws.send(json.dumps({"role": "phone",
-                                      "pair_id": pairing["pair_id"]}))
+            await ws.send(json.dumps(config.hello(pairing, "phone")))
             async for raw in ws:
                 msg = json.loads(raw)
                 if "blob" not in msg:

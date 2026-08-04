@@ -79,7 +79,7 @@ async def fetch_code(service: str) -> str:
 
     wake_phone(pairing)
     async with websockets.connect(pairing["relay"]) as ws:
-        await ws.send(json.dumps({"role": "pc", "pair_id": pairing["pair_id"]}))
+        await ws.send(json.dumps(config.hello(pairing, "pc")))
         await ws.send(json.dumps(
             {"blob": crypto.seal(key, {"t": "req", "id": req_id,
                                        "service": service})}))
@@ -109,6 +109,14 @@ def deliver(code: str, type_it: bool):
             return
 
 
+def remember_service(service: str):
+    """Track requested services so the hotkey picker can list them."""
+    f = config.CONF_DIR / "services.txt"
+    known = f.read_text().split() if f.exists() else []
+    if service not in known:
+        f.write_text("\n".join(known + [service]) + "\n")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("service", help="service name shown on the phone prompt")
@@ -119,6 +127,7 @@ def main():
         code = asyncio.run(fetch_code(args.service))
     except (OSError, websockets.WebSocketException) as e:
         raise SystemExit(f"relay unreachable: {e}")
+    remember_service(args.service)
     deliver(code, args.type)
 
 
