@@ -48,6 +48,7 @@ data class HomeState(
     val services: List<String> = emptyList(),
     val wakeReady: Boolean = false,
     val batteryExempt: Boolean = true,
+    val instantPrompt: Boolean = true,
 )
 
 class MainActivity : AppCompatActivity() {
@@ -99,6 +100,7 @@ class MainActivity : AppCompatActivity() {
                 StatusCard()
                 ServicesCard()
                 ActionButtons()
+                if (!state.instantPrompt) InstantPromptCard()
                 if (!state.batteryExempt) BatteryCard()
             }
         }
@@ -163,6 +165,24 @@ class MainActivity : AppCompatActivity() {
                 "Encrypted backup saved to Downloads/8fac-backup.json"
             else "Export failed")
         }, Modifier.fillMaxWidth()) { Text("Export encrypted backup") }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun InstantPromptCard() = Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Fingerprint-only approval",
+                style = MaterialTheme.typography.titleMedium)
+            Text("Android blocks apps from opening the prompt by themselves " +
+                "until you allow it. Without this you must tap the " +
+                "notification first.",
+                style = MaterialTheme.typography.bodyMedium)
+            TextButton(onClick = {
+                startActivity(Intent(
+                    Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                    Uri.parse("package:$packageName")))
+            }) { Text("Allow instant prompt") }
+        }
     }
 
     @androidx.compose.runtime.Composable
@@ -267,7 +287,10 @@ class MainActivity : AppCompatActivity() {
     private fun refresh() {
         val pairing = Pairing.load(this)
         val pm = getSystemService(PowerManager::class.java)
+        val nm = getSystemService(android.app.NotificationManager::class.java)
         state = HomeState(
+            instantPrompt = Build.VERSION.SDK_INT < 34 ||
+                nm.canUseFullScreenIntent(),
             paired = pairing != null,
             relayHost = pairing?.relay?.removePrefix("wss://")
                 ?.removePrefix("ws://") ?: "",

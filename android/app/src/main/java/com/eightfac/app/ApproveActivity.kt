@@ -6,49 +6,90 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.appcompat.app.AppCompatActivity
+import androidx.biometric.BiometricManager.Authenticators
 import androidx.biometric.BiometricPrompt
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
 
-/** The one-tap-plus-fingerprint approval flow:
- *  notification (shows WHICH service — never approve blind, PROTOCOL.md §3)
- *  → tap → BiometricPrompt wrapping the Keystore HMAC key → compute TOTP
- *  → encrypted reply via RelayService. */
+/** Fingerprint-only approval.
+ *
+ *  A request lights the screen (full-screen intent, like an incoming call)
+ *  straight into the biometric prompt: no tap, no app to open — just the
+ *  sensor. The prompt is persistent by design: accidental dismissals
+ *  re-show it, so the only ways out are the fingerprint, the explicit Deny
+ *  button, or the 45 s timeout that matches the PC side.
+ *
+ *  NOTE: Android 14+ rejects full-screen intents from non-calling apps
+ *  until the user grants "Full screen intents" in special app access —
+ *  MainActivity surfaces that (see canUseFullScreenIntent). */
 class ApproveActivity : AppCompatActivity() {
+
+    private lateinit var service: String
+    private lateinit var reqId: String
+    private var settled = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val service = intent.getStringExtra("service") ?: return finish()
-        val reqId = intent.getStringExtra("req_id") ?: return finish()
+        service = intent.getStringExtra("service") ?: return finish()
+        reqId = intent.getStringExtra("req_id") ?: return finish()
 
+        setShowWhenLocked(true)
+        setTurnScreenOn(true)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        // The PC gives up at 45 s; stop nagging at the same moment.
+        window.decorView.postDelayed({ settle(approved = false) }, 45_000)
+        prompt()
+    }
+
+    private fun prompt() {
+        if (settled) return
         val mac = SecretVault.macFor(service)
-        val prompt = BiometricPrompt(this,
-            ContextCompat.getMainExecutor(this),
+        val bp = BiometricPrompt(this, ContextCompat.getMainExecutor(this),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(
                     result: BiometricPrompt.AuthenticationResult) {
                     val code = Totp.code(result.cryptoObject!!.mac!!)
                     RelayService.sendFrom(this@ApproveActivity, JSONObject()
                         .put("t", "code").put("id", reqId).put("code", code))
-                    finish()
+                    settle(approved = true)
                 }
 
                 override fun onAuthenticationError(code: Int, msg: CharSequence) {
-                    RelayService.sendFrom(this@ApproveActivity, JSONObject()
-                        .put("t", "deny").put("id", reqId))
-                    finish()
+                    when (code) {
+                        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
+                        BiometricPrompt.ERROR_USER_CANCELED,
+                        BiometricPrompt.ERROR_LOCKOUT,
+                        BiometricPrompt.ERROR_LOCKOUT_PERMANENT ->
+                            settle(approved = false)
+                        // swipe-away, transient system cancels: insist
+                        else -> window.decorView.postDelayed({ prompt() }, 400)
+                    }
                 }
             })
 
-        prompt.authenticate(
+        bp.authenticate(
             BiometricPrompt.PromptInfo.Builder()
-                .setTitle("Code request: $service")
-                .setSubtitle("Approve TOTP for your paired PC?")
+                .setTitle(service)
+                .setSubtitle("Approve 2FA code for your PC")
                 .setNegativeButtonText("Deny")
+                .setConfirmationRequired(false) // sensor touch = done
+                .setAllowedAuthenticators(Authenticators.BIOMETRIC_STRONG)
                 .build(),
             BiometricPrompt.CryptoObject(mac))
+    }
+
+    private fun settle(approved: Boolean) {
+        if (settled) return
+        settled = true
+        if (!approved) {
+            RelayService.sendFrom(this, JSONObject()
+                .put("t", "deny").put("id", reqId))
+        }
+        finishAndRemoveTask()
     }
 
     companion object {
@@ -58,23 +99,20 @@ class ApproveActivity : AppCompatActivity() {
                 "requests", "Code requests", NotificationManager.IMPORTANCE_HIGH))
             val intent = Intent(ctx, ApproveActivity::class.java)
                 .putExtra("service", service).putExtra("req_id", reqId)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TASK)
             val pi = PendingIntent.getActivity(ctx, reqId.hashCode(), intent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             nm.notify(reqId.hashCode(), NotificationCompat.Builder(ctx, "requests")
                 .setContentTitle("Code request: $service")
-                .setContentText("Tap to approve with fingerprint")
+                .setContentText("Approve with fingerprint")
                 .setSmallIcon(R.drawable.ic_stat_8fac)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_CALL)
                 .setContentIntent(pi)
-                // locked/screen-off phone: launch the fingerprint prompt
-                // DIRECTLY (like an incoming call) — approval is then a
-                // single sensor touch, no tap. Phone-in-use falls back to
-                // a heads-up notification by OS design.
                 .setFullScreenIntent(pi, true)
                 .setAutoCancel(true)
-                .setTimeoutAfter(45_000) // matches PC-side TIMEOUT
+                .setTimeoutAfter(45_000)
                 .build())
         }
     }
