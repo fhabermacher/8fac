@@ -53,9 +53,12 @@ def main():
             tk.Button(frame, text=s, font=("Sans", 12), anchor="w",
                       command=lambda s=s: done(s)
                       ).pack(fill="x", pady=1)
-        if not filtered and q:
-            tk.Label(frame, text=f'Enter ↵ requests "{q.strip()}"',
-                     font=("Sans", 10), fg="gray").pack()
+        if not filtered:
+            hint = (f'Enter ↵ requests "{q.strip()}"' if q.strip()
+                    else "No history yet — type a service name and press "
+                         "Enter.\nServices appear as buttons after first use.")
+            tk.Label(frame, text=hint, font=("Sans", 10), fg="gray",
+                     justify="left").pack(anchor="w")
 
     def on_enter(_=None):
         focused = root.focus_get()

@@ -5,8 +5,10 @@ set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONF="${EIGHTFAC_CONF:-$HOME/.config/8fac}"
 
-# type-to-filter picker (tkinter); zenity as fallback
-service=$(cd "$DIR" && "$DIR/.venv/bin/python" "$DIR/pc/picker.py" 2>/dev/null)
+# Errors go to a log, never /dev/null: a silently crashing picker is
+# indistinguishable from "user pressed Esc", which cost an afternoon once.
+LOG="$CONF/hotkey.log"
+service=$("$DIR/.venv/bin/python" "$DIR/pc/picker.py" 2>>"$LOG")
 if [ -z "${service:-}" ]; then
     exit 0
 fi
