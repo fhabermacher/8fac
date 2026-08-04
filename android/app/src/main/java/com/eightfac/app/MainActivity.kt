@@ -57,6 +57,7 @@ class MainActivity : AppCompatActivity() {
     private var scopeDialog by mutableStateOf(false)
     // otpauth URI scanned and awaiting the backup-passphrase decision
     private var pendingImport by mutableStateOf<String?>(null)
+    private var deleteCandidate by mutableStateOf<String?>(null)
 
     private val scanPairing = registerForActivityResult(ScanContract()) { res ->
         res.contents?.let {
@@ -91,7 +92,14 @@ class MainActivity : AppCompatActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     @androidx.compose.runtime.Composable
     private fun HomeScreen() {
-        Scaffold(topBar = { TopAppBar(title = { Text("8fac") }) }) { pad ->
+        Scaffold(topBar = {
+            TopAppBar(title = { Text("8fac") }, actions = {
+                TextButton(onClick = {
+                    startActivity(Intent(this@MainActivity,
+                        HelpActivity::class.java))
+                }) { Text("Help") }
+            })
+        }) { pad ->
             Column(
                 Modifier.padding(pad).padding(horizontal = 20.dp)
                     .fillMaxSize().verticalScroll(rememberScrollState()),
@@ -106,7 +114,31 @@ class MainActivity : AppCompatActivity() {
         }
         if (scopeDialog) ScopeDialog()
         pendingImport?.let { BackupDialog(it) }
+        deleteCandidate?.let { DeleteDialog(it) }
     }
+
+    @androidx.compose.runtime.Composable
+    private fun DeleteDialog(service: String) = AlertDialog(
+        onDismissRequest = { deleteCandidate = null },
+        title = { Text("Remove $service?") },
+        text = {
+            Text("The secret is deleted from this phone permanently. " +
+                (if (Backup.coveredServices(this).contains(service))
+                    "A copy remains in your encrypted backup."
+                 else "It has NO backup — make sure the account has " +
+                    "another 2FA method or recovery codes first."))
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                SecretVault.delete(service)
+                deleteCandidate = null
+                refresh()
+            }) { Text("Delete") }
+        },
+        dismissButton = {
+            TextButton(onClick = { deleteCandidate = null }) { Text("Cancel") }
+        },
+    )
 
     @androidx.compose.runtime.Composable
     private fun StatusCard() = Card(Modifier.fillMaxWidth()) {
@@ -135,10 +167,17 @@ class MainActivity : AppCompatActivity() {
             if (state.services.isEmpty())
                 Text("None yet — add one by scanning a site's authenticator QR.",
                     style = MaterialTheme.typography.bodyMedium)
-            else Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                state.services.forEach {
-                    AssistChip(onClick = {}, label = { Text(it) })
+            else {
+                val covered = Backup.coveredServices(this@MainActivity)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    state.services.forEach { svc ->
+                        AssistChip(onClick = { deleteCandidate = svc },
+                            label = { Text(
+                                if (covered.contains(svc)) "$svc ✓" else svc) })
+                    }
                 }
+                Text("✓ = in encrypted backup · tap a chip to remove",
+                    style = MaterialTheme.typography.labelSmall)
             }
         }
     }
@@ -274,7 +313,8 @@ class MainActivity : AppCompatActivity() {
             ?: label.substringBefore(':').ifEmpty { label })
             .lowercase().replace(" ", "-")
         runCatching {
-            if (passphrase != null) Backup.append(this, passphrase, otpauth)
+            if (passphrase != null)
+                Backup.append(this, passphrase, otpauth, service)
             SecretVault.importSecret(service,
                 Totp.base32Decode(uri.getQueryParameter("secret")!!))
         }.onSuccess {

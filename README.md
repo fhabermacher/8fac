@@ -20,7 +20,28 @@ PC (hotkey: request.py) ──E2E blob──▶ relay.py ──E2E blob──▶
   secretbox, otpauth:// QR import, manual fallback codes screen, reconnecting
   OkHttp relay client. Not yet device-tested — open in Android Studio.
 
-## Quickstart (all on one machine)
+## Install
+
+**PC (Linux):** `./install.sh` — sets up Python, asks which global hotkey
+you want (default `<Super>F9`), registers it (GNOME; prints instructions
+for other DEs). The hotkey opens a picker (type-to-filter, recent services
+as buttons), then the approved code is typed into the focused field
+(X11/XTEST, xdotool/wtype fallback) or copied to the clipboard.
+
+**PC (Windows):** `powershell -ExecutionPolicy Bypass -File install.ps1` —
+same flow; the hotkey (default `Ctrl+Alt+8`) lives on a Start-Menu
+shortcut, codes are typed via SendInput. macOS works too (osascript
+typing); bind `pc/8fac-hotkey.sh` with your tool of choice.
+
+**Phone (Android):** sideload the APK from
+[Releases](https://github.com/fhabermacher/8fac/releases). For automatic
+updates, add this repo to [Obtainium](https://github.com/ImranR98/Obtainium).
+Not on the Play Store (closed-testing requirements make it disproportionate
+for a personal project); F-Droid inclusion is possible later if demand
+appears. Also install [ntfy](https://ntfy.sh) so a sleeping phone can be
+woken.
+
+## Quickstart (test everything on one machine)
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt

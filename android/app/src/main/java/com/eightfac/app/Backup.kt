@@ -30,6 +30,17 @@ object Backup {
     private fun file(ctx: Context) = File(ctx.filesDir, "backup.8fac.json")
     fun exists(ctx: Context) = file(ctx).exists()
 
+    /** Which services have a copy in the backup (names only, no secrets). */
+    fun coveredServices(ctx: Context): Set<String> =
+        ctx.getSharedPreferences("backup_meta", 0)
+            .getStringSet("names", emptySet()) ?: emptySet()
+
+    private fun recordCovered(ctx: Context, service: String) {
+        val p = ctx.getSharedPreferences("backup_meta", 0)
+        p.edit().putStringSet("names",
+            (coveredServices(ctx) + service).toSet()).apply()
+    }
+
     private fun deriveKey(pass: String, salt: ByteArray): ByteArray {
         val out = ByteArray(SecretBox.KEYBYTES)
         val pw = pass.toByteArray()
@@ -59,7 +70,8 @@ object Backup {
 
     /** Append a URI; creates the backup on first use. Throws on wrong
      *  passphrase for an existing backup. */
-    fun append(ctx: Context, passphrase: String, otpauthUri: String) {
+    fun append(ctx: Context, passphrase: String, otpauthUri: String,
+               service: String? = null) {
         val f = file(ctx)
         val (salt, uris) = if (f.exists()) {
             val o = JSONObject(f.readText())
@@ -79,6 +91,7 @@ object Backup {
             .put("salt", Base64.encodeToString(salt, Base64.NO_WRAP))
             .put("blob", Base64.encodeToString(blob, Base64.NO_WRAP))
             .toString())
+        service?.let { recordCovered(ctx, it) }  // only after a good write
     }
 
     /** Copy the encrypted file into Downloads/ so it can be synced/kept

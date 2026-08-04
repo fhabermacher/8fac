@@ -1,3 +1,4 @@
 websockets>=12
 pynacl>=1.5
 qrcode>=7  # optional: ASCII QR for pairing
+python-xlib>=0.33; sys_platform == "linux"  # sudo-free typing on X11

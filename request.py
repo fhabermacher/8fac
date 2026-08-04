@@ -7,8 +7,6 @@
 import argparse
 import asyncio
 import json
-import shutil
-import subprocess
 import sys
 import time
 import urllib.request
@@ -16,7 +14,7 @@ import uuid
 
 import websockets
 
-from eightfac import config, crypto
+from eightfac import config, crypto, typer
 
 TIMEOUT = 45  # phone gets this long to approve
 
@@ -93,20 +91,11 @@ async def fetch_code(service: str) -> str:
 
 def deliver(code: str, type_it: bool):
     print(code)
-    if type_it:
-        for tool, argv in [("xdotool", ["xdotool", "type", "--", code]),
-                           ("wtype", ["wtype", code])]:
-            if shutil.which(tool):
-                subprocess.run(argv, check=False)
-                return
-    for tool, argv in [("wl-copy", ["wl-copy"]), ("xclip", ["xclip", "-sel", "c"])]:
-        if shutil.which(tool):
-            # clipboard tools fork a resident child; detach its stdio so
-            # callers capturing our output ($(...)) see EOF and don't hang
-            subprocess.run(argv, input=code.encode(), check=False,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("(copied to clipboard)", file=sys.stderr)
-            return
+    if type_it and typer.type_text(code):
+        print("(typed into focused field)", file=sys.stderr)
+        return
+    if typer.copy_text(code):
+        print("(copied to clipboard)", file=sys.stderr)
 
 
 def remember_service(service: str):

@@ -37,6 +37,7 @@
 
         <!-- Manual fallback: codes shown locally, relay-down ≠ lockout -->
         <activity android:name=".CodesActivity" android:exported="false" />
+        <activity android:name=".HelpActivity" android:exported="false" />
 
         <!-- Widget tap target: scope picker + fingerprint, then finishes -->
         <activity android:name=".ArmActivity" android:exported="false"
