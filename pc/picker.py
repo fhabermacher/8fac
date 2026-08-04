@@ -48,7 +48,12 @@ def main():
     root.title("8fac")
     root.configure(bg=c["bg"])
     root.attributes("-topmost", True)
-    root.overrideredirect(True)  # borderless card; Esc / click-away closes
+    # A WM-managed dialog, NOT overrideredirect: unmanaged windows never get
+    # keyboard focus from the window manager, which silently breaks Tab.
+    try:
+        root.attributes("-type", "dialog")
+    except tk.TclError:
+        pass
     W = 380
     root.geometry("%dx%d+%d+%d" % (
         W, 120, root.winfo_screenwidth() // 2 - W // 2,
@@ -95,7 +100,7 @@ def main():
                       activeforeground=c["fg"], relief="flat", padx=12, pady=7,
                       highlightthickness=2, highlightbackground=c["card"],
                       highlightcolor=c["accent"], cursor="hand2",
-                      command=lambda: done(text))
+                      takefocus=1, command=lambda: done(text))
         b.bind("<Enter>", lambda e: b.configure(bg=c["hover"]))
         b.bind("<Leave>", lambda e: b.configure(bg=c["card"]))
         b.bind("<FocusIn>", lambda e: b.configure(bg=c["hover"]))
@@ -138,9 +143,14 @@ def main():
     root.bind("<Escape>", cancel)
     root.bind("<FocusOut>", lambda e: None)
 
+    def take_focus():
+        root.lift()
+        root.focus_force()
+        entry.focus_set()
+
     refilter()
-    entry.focus_force()
-    root.after(50, lambda: root.focus_force())
+    take_focus()
+    root.after(80, take_focus)  # some WMs map the window a beat later
     root.mainloop()
     sys.exit(1)
 

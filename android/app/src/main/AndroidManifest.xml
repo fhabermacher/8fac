@@ -30,7 +30,10 @@
         <activity android:name=".ApproveActivity"
             android:exported="false"
             android:showWhenLocked="true"
-            android:turnScreenOn="true" />
+            android:turnScreenOn="true"
+            android:launchMode="singleTop"
+            android:excludeFromRecents="true"
+            android:noHistory="true" />
 
         <!-- Manual fallback: codes shown locally, relay-down ≠ lockout -->
         <activity android:name=".CodesActivity" android:exported="false" />

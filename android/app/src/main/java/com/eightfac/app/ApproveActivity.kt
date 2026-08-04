@@ -89,6 +89,10 @@ class ApproveActivity : AppCompatActivity() {
             RelayService.sendFrom(this, JSONObject()
                 .put("t", "deny").put("id", reqId))
         }
+        // setAutoCancel only fires on a tap, and a full-screen launch isn't
+        // one — without this the request notification lingers after approval.
+        getSystemService(NotificationManager::class.java)
+            .cancel(reqId.hashCode())
         finishAndRemoveTask()
     }
 
