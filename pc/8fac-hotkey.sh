@@ -5,15 +5,11 @@ set -u
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONF="${EIGHTFAC_CONF:-$HOME/.config/8fac}"
 
-known=$(cat "$CONF/services.txt" 2>/dev/null)
-if [ -n "$known" ]; then
-    service=$(zenity --list --title="8fac" --text="Code for which service?" \
-        --column=service $known --height=280 2>/dev/null)
-else
-    service=$(zenity --entry --title="8fac" \
-        --text="Service name (as enrolled on the phone):" 2>/dev/null)
+# type-to-filter picker (tkinter); zenity as fallback
+service=$(cd "$DIR" && "$DIR/.venv/bin/python" "$DIR/pc/picker.py" 2>/dev/null)
+if [ -z "${service:-}" ]; then
+    exit 0
 fi
-[ -z "${service:-}" ] && exit 0
 
 code_err=$("$DIR/.venv/bin/python" "$DIR/request.py" "$service" --type 2>&1 >/dev/null)
 status=$?

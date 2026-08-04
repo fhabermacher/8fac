@@ -110,11 +110,12 @@ def deliver(code: str, type_it: bool):
 
 
 def remember_service(service: str):
-    """Track requested services so the hotkey picker can list them."""
+    """Track requested services, most-recent first, for the hotkey picker."""
     f = config.CONF_DIR / "services.txt"
     known = f.read_text().split() if f.exists() else []
-    if service not in known:
-        f.write_text("\n".join(known + [service]) + "\n")
+    if known[:1] != [service]:
+        known = [service] + [s for s in known if s != service]
+        f.write_text("\n".join(known[:20]) + "\n")
 
 
 def main():
